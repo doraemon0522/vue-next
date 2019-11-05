@@ -8,11 +8,7 @@ export interface ReactiveEffect<T = any> {
   active: boolean
   raw: () => T
   deps: Array<Dep>
-  computed?: boolean
-  scheduler?: (run: Function) => void
-  onTrack?: (event: DebuggerEvent) => void
-  onTrigger?: (event: DebuggerEvent) => void
-  onStop?: () => void
+  options: ReactiveEffectOptions
 }
 
 export interface ReactiveEffectOptions {
@@ -62,8 +58,8 @@ export function effect<T = any>(
 export function stop(effect: ReactiveEffect) {
   if (effect.active) {
     cleanup(effect)
-    if (effect.onStop) {
-      effect.onStop()
+    if (effect.options.onStop) {
+      effect.options.onStop()
     }
     effect.active = false
   }
@@ -79,12 +75,8 @@ function createReactiveEffect<T = any>(
   effect._isEffect = true
   effect.active = true
   effect.raw = fn
-  effect.scheduler = options.scheduler
-  effect.onTrack = options.onTrack
-  effect.onTrigger = options.onTrigger
-  effect.onStop = options.onStop
-  effect.computed = options.computed
   effect.deps = []
+  effect.options = options
   return effect
 }
 
@@ -146,8 +138,8 @@ export function track(target: object, type: OperationTypes, key?: unknown) {
     dep.add(effect)
     // 而对于一个监听函数，它会存放着 所有存着它自身的dep。
     effect.deps.push(dep)
-    if (__DEV__ && effect.onTrack) {
-      effect.onTrack({
+    if (__DEV__ && effect.options.onTrack) {
+      effect.options.onTrack({
         effect,
         target,
         type,
@@ -202,7 +194,7 @@ function addRunners(
 ) {
   if (effectsToAdd !== void 0) {
     effectsToAdd.forEach(effect => {
-      if (effect.computed) {
+      if (effect.options.computed) {
         computedRunners.add(effect)
       } else {
         effects.add(effect)
@@ -218,17 +210,17 @@ function scheduleRun(
   key: unknown,
   extraInfo?: DebuggerEventExtraInfo
 ) {
-  if (__DEV__ && effect.onTrigger) {
+  if (__DEV__ && effect.options.onTrigger) {
     const event: DebuggerEvent = {
       effect,
       target,
       key,
       type
     }
-    effect.onTrigger(extraInfo ? extend(event, extraInfo) : event)
+    effect.options.onTrigger(extraInfo ? extend(event, extraInfo) : event)
   }
-  if (effect.scheduler !== void 0) {
-    effect.scheduler(effect)
+  if (effect.options.scheduler !== void 0) {
+    effect.options.scheduler(effect)
   } else {
     effect()
   }

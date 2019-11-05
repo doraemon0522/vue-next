@@ -47,10 +47,11 @@ import { ComponentPublicInstance } from './componentProxy'
 import { App, createAppAPI } from './apiApp'
 import {
   SuspenseBoundary,
-  SuspenseImpl,
-  queueEffectWithSuspense
-} from './suspense'
+  queueEffectWithSuspense,
+  SuspenseImpl
+} from './components/Suspense'
 import { ErrorCodes, callWithErrorHandling } from './errorHandling'
+import { KeepAliveSink } from './components/KeepAlive'
 
 export interface RendererOptions<HostNode = any, HostElement = any> {
   patchProp(
@@ -131,7 +132,7 @@ function isSameType(n1: VNode, n2: VNode): boolean {
   return n1.type === n2.type && n1.key === n2.key
 }
 
-function invokeHooks(hooks: Function[], arg?: DebuggerEvent) {
+export function invokeHooks(hooks: Function[], arg?: DebuggerEvent) {
   for (let i = 0; i < hooks.length; i++) {
     hooks[i](arg)
   }
@@ -618,6 +619,8 @@ export function createRenderer<
     }
   }
 
+  let devFragmentID = 0
+
   function processFragment(
     n1: HostVNode | null,
     n2: HostVNode,
@@ -628,10 +631,16 @@ export function createRenderer<
     isSVG: boolean,
     optimized: boolean
   ) {
-    const fragmentStartAnchor = (n2.el = n1 ? n1.el : hostCreateComment(''))!
+    const showID = __DEV__ && !__TEST__
+    const fragmentStartAnchor = (n2.el = n1
+      ? n1.el
+      : hostCreateComment(showID ? `fragment-${devFragmentID}-start` : ''))!
     const fragmentEndAnchor = (n2.anchor = n1
       ? n1.anchor
-      : hostCreateComment(''))!
+      : hostCreateComment(showID ? `fragment-${devFragmentID}-end` : ''))!
+    if (showID) {
+      devFragmentID++
+    }
     if (n1 == null) {
       hostInsert(fragmentStartAnchor, container, anchor)
       hostInsert(fragmentEndAnchor, container, anchor)
@@ -724,7 +733,7 @@ export function createRenderer<
       if (targetSelector !== (n1.props && n1.props.target)) {
         const nextTarget = (n2.target = isString(targetSelector)
           ? hostQuerySelector(targetSelector)
-          : null)
+          : targetSelector)
         if (nextTarget != null) {
           // move content
           if (shapeFlag & ShapeFlags.TEXT_CHILDREN) {
@@ -755,14 +764,22 @@ export function createRenderer<
     optimized: boolean
   ) {
     if (n1 == null) {
-      mountComponent(
-        n2,
-        container,
-        anchor,
-        parentComponent,
-        parentSuspense,
-        isSVG
-      )
+      if (n2.shapeFlag & ShapeFlags.COMPONENT_KEPT_ALIVE) {
+        ;(parentComponent!.sink as KeepAliveSink).activate(
+          n2,
+          container,
+          anchor
+        )
+      } else {
+        mountComponent(
+          n2,
+          container,
+          anchor,
+          parentComponent,
+          parentSuspense,
+          isSVG
+        )
+      }
     } else {
       const instance = (n2.component = n1.component)!
 
@@ -795,6 +812,14 @@ export function createRenderer<
       }
     }
     if (n2.ref !== null && parentComponent !== null) {
+      if (__DEV__ && !(n2.shapeFlag & ShapeFlags.STATEFUL_COMPONENT)) {
+        pushWarningContext(n2)
+        warn(
+          `Functional components do not support "ref" because they do not ` +
+            `have instances.`
+        )
+        popWarningContext()
+      }
       setRef(n2.ref, n1 && n1.ref, parentComponent, n2.component!.renderProxy)
     }
   }
@@ -816,8 +841,17 @@ export function createRenderer<
       pushWarningContext(initialVNode)
     }
 
+    const Comp = initialVNode.type as Component
+
+    // inject renderer internals for keepAlive
+    if ((Comp as any).__isKeepAlive) {
+      const sink = instance.sink as KeepAliveSink
+      sink.renderer = internals
+      sink.parentSuspense = parentSuspense
+    }
+
     // resolve props and slots for setup context
-    const propsOptions = (initialVNode.type as Component).props
+    const propsOptions = Comp.props
     resolveProps(instance, initialVNode.props, propsOptions)
     resolveSlots(instance, initialVNode.children)
 
@@ -830,8 +864,8 @@ export function createRenderer<
     // before proceeding
     if (__FEATURE_SUSPENSE__ && instance.asyncDep) {
       if (!parentSuspense) {
-        // TODO handle this properly
-        throw new Error('Async setup() is used without a suspense boundary!')
+        if (__DEV__) warn('async setup() is used without a suspense boundary!')
+        return
       }
 
       parentSuspense.registerDep(instance, setupRenderEffect)
@@ -845,6 +879,7 @@ export function createRenderer<
 
     setupRenderEffect(
       instance,
+      parentComponent,
       parentSuspense,
       initialVNode,
       container,
@@ -859,6 +894,7 @@ export function createRenderer<
 
   function setupRenderEffect(
     instance: ComponentInternalInstance,
+    parentComponent: ComponentInternalInstance | null,
     parentSuspense: HostSuspenseBoundary | null,
     initialVNode: HostVNode,
     container: HostElement,
@@ -879,6 +915,13 @@ export function createRenderer<
         // mounted hook
         if (instance.m !== null) {
           queuePostRenderEffect(instance.m, parentSuspense)
+        }
+        // activated hook for keep-alive roots.
+        if (
+          instance.a !== null &&
+          instance.vnode.shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE
+        ) {
+          queuePostRenderEffect(instance.a, parentSuspense)
         }
         mounted = true
       } else {
@@ -1381,7 +1424,11 @@ export function createRenderer<
     }
 
     if (shapeFlag & ShapeFlags.COMPONENT) {
-      unmountComponent(vnode.component!, parentSuspense, doRemove)
+      if (shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE) {
+        ;(parentComponent!.sink as KeepAliveSink).deactivate(vnode)
+      } else {
+        unmountComponent(vnode.component!, parentSuspense, doRemove)
+      }
       return
     }
 
@@ -1428,7 +1475,7 @@ export function createRenderer<
     parentSuspense: HostSuspenseBoundary | null,
     doRemove?: boolean
   ) {
-    const { bum, effects, update, subTree, um } = instance
+    const { bum, effects, update, subTree, um, da, isDeactivated } = instance
     // beforeUnmount hook
     if (bum !== null) {
       invokeHooks(bum)
@@ -1447,6 +1494,14 @@ export function createRenderer<
     // unmounted hook
     if (um !== null) {
       queuePostRenderEffect(um, parentSuspense)
+    }
+    // deactivated hook
+    if (
+      da !== null &&
+      !isDeactivated &&
+      instance.vnode.shapeFlag & ShapeFlags.COMPONENT_SHOULD_KEEP_ALIVE
+    ) {
+      queuePostRenderEffect(da, parentSuspense)
     }
     queuePostFlushCb(() => {
       instance.isUnmounted = true

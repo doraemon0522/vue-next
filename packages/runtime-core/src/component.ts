@@ -25,7 +25,7 @@ import {
   makeMap,
   isPromise
 } from '@vue/shared'
-import { SuspenseBoundary } from './suspense'
+import { SuspenseBoundary } from './components/Suspense'
 import {
   CompilerError,
   CompilerOptions,
@@ -42,6 +42,7 @@ export interface FunctionalComponent<P = {}> {
 }
 
 export type Component = ComponentOptions | FunctionalComponent
+export { ComponentOptions }
 
 type LifecycleHook = Function[] | null
 
@@ -89,12 +90,9 @@ export interface ComponentInternalInstance {
   // after initialized (e.g. inline handlers)
   renderCache: (Function | VNode)[] | null
 
+  // assets for fast resolution
   components: Record<string, Component>
   directives: Record<string, Directive>
-
-  asyncDep: Promise<any> | null
-  asyncResult: unknown
-  asyncResolved: boolean
 
   // the rest are only for stateful components
   renderContext: Data
@@ -108,11 +106,17 @@ export interface ComponentInternalInstance {
   refs: Data
   emit: Emit
 
-  // user namespace
-  user: { [key: string]: any }
+  // suspense related
+  asyncDep: Promise<any> | null
+  asyncResult: unknown
+  asyncResolved: boolean
+
+  // storage for any extra properties
+  sink: { [key: string]: any }
 
   // lifecycle
   isUnmounted: boolean
+  isDeactivated: boolean
   [LifecycleHooks.BEFORE_CREATE]: LifecycleHook
   [LifecycleHooks.CREATED]: LifecycleHook
   [LifecycleHooks.BEFORE_MOUNT]: LifecycleHook
@@ -141,7 +145,7 @@ export function createComponentInstance(
     vnode,
     parent,
     appContext,
-    type: vnode.type,
+    type: vnode.type as Component,
     root: null!, // set later so it can point to itself
     next: null,
     subTree: null!, // will be set synchronously right after creation
@@ -173,11 +177,13 @@ export function createComponentInstance(
     asyncResolved: false,
 
     // user namespace for storing whatever the user assigns to `this`
-    user: {},
+    // can also be used as a wildcard storage for ad-hoc injections internally
+    sink: {},
 
     // lifecycle hooks
     // not using enums here because it results in computed properties
     isUnmounted: false,
+    isDeactivated: false,
     bc: null,
     c: null,
     bm: null,
@@ -336,7 +342,8 @@ type CompileFunction = (
 
 let compile: CompileFunction | undefined
 
-export function registerRuntimeCompiler(_compile: CompileFunction) {
+// exported method uses any to avoid d.ts relying on the compiler types.
+export function registerRuntimeCompiler(_compile: any) {
   compile = _compile
 }
 
