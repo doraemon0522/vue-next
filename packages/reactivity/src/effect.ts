@@ -140,7 +140,11 @@ export function track(target: object, type: OperationTypes, key?: unknown) {
     depsMap.set(key!, (dep = new Set()))
   }
   if (!dep.has(effect)) {
+    // 双向存法 需要仔细理解~~
+    // 对于一个响应式数据，它在targetMap中存着一个Map数据（我称之为「响应依赖映射」）。
+    // 这个响应依赖映射的key是该响应式数据的某个属性值，value是所有用到这个响应数据属性值的所有监听函数，也即是Set集合dep。
     dep.add(effect)
+    // 而对于一个监听函数，它会存放着 所有存着它自身的dep。
     effect.deps.push(dep)
     if (__DEV__ && effect.onTrack) {
       effect.onTrack({
