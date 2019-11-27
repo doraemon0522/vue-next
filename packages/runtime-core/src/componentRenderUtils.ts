@@ -14,6 +14,7 @@ import { ShapeFlags } from './shapeFlags'
 import { handleError, ErrorCodes } from './errorHandling'
 import { PatchFlags, EMPTY_OBJ } from '@vue/shared'
 import { warn } from './warning'
+import { readonlyProps } from '@vue/reactivity'
 
 // mark the current rendering instance for asset resolution (e.g.
 // resolveComponent, resolveDirective) during render
@@ -52,14 +53,15 @@ export function renderComponentRoot(
     } else {
       // functional
       const render = Component as FunctionalComponent
+      const propsToPass = __DEV__ ? readonlyProps(props) : props
       result = normalizeVNode(
         render.length > 1
-          ? render(props, {
+          ? render(propsToPass, {
               attrs,
               slots,
               emit
             })
-          : render(props, null as any /* we know it doesn't need it */)
+          : render(propsToPass, null as any /* we know it doesn't need it */)
       )
     }
 
@@ -78,10 +80,26 @@ export function renderComponentRoot(
       } else if (__DEV__ && !accessedAttrs) {
         warn(
           `Extraneous non-props attributes (${Object.keys(attrs).join(',')}) ` +
-            `were passed to component but could not be automatically inhertied ` +
+            `were passed to component but could not be automatically inherited ` +
             `because component renders fragment or text root nodes.`
         )
       }
+    }
+
+    // inherit transition data
+    if (vnode.transition != null) {
+      if (
+        __DEV__ &&
+        !(result.shapeFlag & ShapeFlags.COMPONENT) &&
+        !(result.shapeFlag & ShapeFlags.ELEMENT) &&
+        result.type !== Comment
+      ) {
+        warn(
+          `Component inside <Transition> renders non-element root node ` +
+            `that cannot be animated.`
+        )
+      }
+      result.transition = vnode.transition
     }
   } catch (err) {
     handleError(err, instance, ErrorCodes.RENDER_FUNCTION)
@@ -120,7 +138,9 @@ export function shouldUpdateComponent(
     // this path is only taken by manually written render functions
     // so presence of any children leads to a forced update
     if (prevChildren != null || nextChildren != null) {
-      return true
+      if (nextChildren == null || !(nextChildren as any).$stable) {
+        return true
+      }
     }
     if (prevProps === nextProps) {
       return false

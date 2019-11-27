@@ -2,7 +2,9 @@ import { makeMap } from './makeMap'
 
 export { makeMap }
 export * from './patchFlags'
-export { isGloballyWhitelisted } from './globalsWhitelist'
+export * from './globalsWhitelist'
+export * from './codeframe'
+export * from './domTagConfig'
 
 export const EMPTY_OBJ: { readonly [key: string]: any } = __DEV__
   ? Object.freeze({})

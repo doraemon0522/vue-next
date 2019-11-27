@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 import ts from 'rollup-plugin-typescript2'
-import replace from 'rollup-plugin-replace'
-import alias from 'rollup-plugin-alias'
-import json from 'rollup-plugin-json'
+import replace from '@rollup/plugin-replace'
+import alias from '@rollup/plugin-alias'
+import json from '@rollup/plugin-json'
 import lernaJson from './lerna.json'
 
 if (!process.env.TARGET) {
@@ -60,7 +60,7 @@ const packageConfigs = process.env.PROD_ONLY
 
 if (process.env.NODE_ENV === 'production') {
   packageFormats.forEach(format => {
-    if (format === 'cjs') {
+    if (format === 'cjs' && packageOptions.prod !== false) {
       packageConfigs.push(createProductionConfig(format))
     }
     if (format === 'global' || format === 'esm-browser') {
@@ -72,6 +72,8 @@ if (process.env.NODE_ENV === 'production') {
 export default packageConfigs
 
 function createConfig(output, plugins = []) {
+  output.externalLiveBindings = false
+
   const isProductionBuild =
     process.env.__DEV__ === 'false' || /\.prod\.js$/.test(output.file)
   const isGlobalBuild = /\.global(\.prod)?\.js$/.test(output.file)
@@ -105,7 +107,9 @@ function createConfig(output, plugins = []) {
   // during a single build.
   hasTSChecked = true
 
-  const externals = Object.keys(aliasOptions).filter(p => p !== '@vue/shared')
+  const externals = Object.keys(aliasOptions)
+    .concat(Object.keys(pkg.dependencies || []))
+    .filter(p => p !== '@vue/shared')
 
   return {
     input: resolve(`src/index.ts`),

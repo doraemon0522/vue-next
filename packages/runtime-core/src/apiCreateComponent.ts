@@ -11,10 +11,18 @@ import { ExtractPropTypes, ComponentPropsOptions } from './componentProps'
 import { isFunction } from '@vue/shared'
 import { VNodeProps } from './vnode'
 
+// createComponent is a utility that is primarily used for type inference
+// when declaring components. Type inference is provided in the component
+// options (provided as the argument). The returned value has artifical types
+// for TSX / manual render function / IDE support.
+
 // overload 1: direct setup function
 // (uses user defined props interface)
 export function createComponent<Props, RawBindings = object>(
-  setup: (props: Props, ctx: SetupContext) => RawBindings | RenderFunction
+  setup: (
+    props: Readonly<Props>,
+    ctx: SetupContext
+  ) => RawBindings | RenderFunction
 ): {
   new (): ComponentPublicInstance<
     Props,
@@ -78,7 +86,6 @@ export function createComponent<
 >(
   options: ComponentOptionsWithObjectProps<PropsOptions, RawBindings, D, C, M>
 ): {
-  // for Vetur and TSX support
   new (): ComponentPublicInstance<
     ExtractPropTypes<PropsOptions>,
     RawBindings,
