@@ -88,6 +88,7 @@ function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
     cleanup(effect)
     try {
       effectStack.push(effect)
+      //fn内引用了依赖数据，执行时，触发这些数据的get,从而走到track，因此effectStack堆栈尾部正好是该effect
       return fn(...args)
     } finally {
       effectStack.pop()
