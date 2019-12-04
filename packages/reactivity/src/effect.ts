@@ -86,6 +86,13 @@ function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
   }
   if (!effectStack.includes(effect)) {
     cleanup(effect)
+    // try...finally的执行顺序:finally在try之后运行
+    // 首先try块中的activeReactiveEffectStack.push(effect)会最先执行
+    // 这条语句不会报错，接下来返回调用fn
+    // 如果这时候退出了函数，意味者finally不会运行代码。
+    // 这里的return被推迟到了finally结束后，但fn(..args)也是在try块中调用的
+    // 下面代码的调用顺序是:activeReactiveEffectStack.push(effect) -> TemporarySave=fn(...args) -> 
+    // activeReactiveEffectStack.pop() -> return TemporarySave
     try {
       effectStack.push(effect)
       //fn内引用了依赖数据，执行时，触发这些数据的get,从而走到track，因此effectStack堆栈尾部正好是该effect
