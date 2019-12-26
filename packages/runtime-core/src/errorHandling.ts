@@ -99,7 +99,7 @@ export function handleError(
   if (instance) {
     let cur = instance.parent
     // the exposed instance is the render proxy to keep it consistent with 2.x
-    const exposedInstance = instance.renderProxy
+    const exposedInstance = instance.proxy
     // in production the hook receives only the error code
     const errorInfo = __DEV__ ? ErrorTypeStrings[type] : type
     while (cur) {
@@ -128,7 +128,7 @@ export function handleError(
   logError(err, type, contextVNode)
 }
 
-// Test-only toggle for testing the uhandled warning behavior
+// Test-only toggle for testing the unhandled warning behavior
 let forceRecover = false
 export function setErrorRecovery(value: boolean) {
   forceRecover = value

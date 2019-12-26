@@ -14,7 +14,6 @@ import { ShapeFlags } from './shapeFlags'
 import { handleError, ErrorCodes } from './errorHandling'
 import { PatchFlags, EMPTY_OBJ } from '@vue/shared'
 import { warn } from './warning'
-import { readonlyProps } from '@vue/reactivity'
 
 // mark the current rendering instance for asset resolution (e.g.
 // resolveComponent, resolveDirective) during render
@@ -35,7 +34,8 @@ export function renderComponentRoot(
   const {
     type: Component,
     vnode,
-    renderProxy,
+    proxy,
+    withProxy,
     props,
     slots,
     attrs,
@@ -49,19 +49,18 @@ export function renderComponentRoot(
   }
   try {
     if (vnode.shapeFlag & ShapeFlags.STATEFUL_COMPONENT) {
-      result = normalizeVNode(instance.render!.call(renderProxy))
+      result = normalizeVNode(instance.render!.call(withProxy || proxy))
     } else {
       // functional
       const render = Component as FunctionalComponent
-      const propsToPass = __DEV__ ? readonlyProps(props) : props
       result = normalizeVNode(
         render.length > 1
-          ? render(propsToPass, {
+          ? render(props, {
               attrs,
               slots,
               emit
             })
-          : render(propsToPass, null as any /* we know it doesn't need it */)
+          : render(props, null as any /* we know it doesn't need it */)
       )
     }
 
@@ -77,7 +76,7 @@ export function renderComponentRoot(
         result.shapeFlag & ShapeFlags.COMPONENT
       ) {
         result = cloneVNode(result, attrs)
-      } else if (__DEV__ && !accessedAttrs) {
+      } else if (__DEV__ && !accessedAttrs && result.type !== Comment) {
         warn(
           `Extraneous non-props attributes (${Object.keys(attrs).join(',')}) ` +
             `were passed to component but could not be automatically inherited ` +
@@ -112,10 +111,25 @@ export function renderComponentRoot(
 export function shouldUpdateComponent(
   prevVNode: VNode,
   nextVNode: VNode,
+  parentComponent: ComponentInternalInstance | null,
   optimized?: boolean
 ): boolean {
   const { props: prevProps, children: prevChildren } = prevVNode
   const { props: nextProps, children: nextChildren, patchFlag } = nextVNode
+
+  // Parent component's render function was hot-updated. Since this may have
+  // caused the child component's slots content to have changed, we need to
+  // force the child to update as well.
+  if (
+    __BUNDLER__ &&
+    __DEV__ &&
+    (prevChildren || nextChildren) &&
+    parentComponent &&
+    parentComponent.renderUpdated
+  ) {
+    return true
+  }
+
   if (patchFlag > 0) {
     if (patchFlag & PatchFlags.DYNAMIC_SLOTS) {
       // slot content that references values that might have changed,

@@ -2,20 +2,20 @@ import { ElementWithTransition } from '../components/Transition'
 
 // compiler should normalize class + :class bindings on the same element
 // into a single binding ['staticClass', dynamic]
-export function patchClass(
-  el: ElementWithTransition,
-  value: string,
-  isSVG: boolean
-) {
-  // if this is an element during a transition, take the temporary transition
-  // classes into account.
-  if (el._vtc) {
-    value = [value, ...el._vtc].join(' ')
+export function patchClass(el: Element, value: string | null, isSVG: boolean) {
+  if (value == null) {
+    value = ''
   }
   // directly setting className should be faster than setAttribute in theory
   if (isSVG) {
     el.setAttribute('class', value)
   } else {
+    // if this is an element during a transition, take the temporary transition
+    // classes into account.
+    const transitionClasses = (el as ElementWithTransition)._vtc
+    if (transitionClasses) {
+      value = [value, ...transitionClasses].join(' ')
+    }
     el.className = value
   }
 }

@@ -3,7 +3,8 @@ import {
   Data,
   Component,
   SetupContext,
-  RenderFunction
+  RenderFunction,
+  SFCInternalOptions
 } from './component'
 import {
   isFunction,
@@ -48,14 +49,14 @@ export interface ComponentOptionsBase<
   D,
   C extends ComputedOptions,
   M extends MethodOptions
-> extends LegacyOptions<Props, RawBindings, D, C, M> {
+> extends LegacyOptions<Props, RawBindings, D, C, M>, SFCInternalOptions {
   setup?: (
     this: null,
     props: Props,
     ctx: SetupContext
   ) => RawBindings | RenderFunction | void
   name?: string
-  template?: string
+  template?: string | object // can be a direct DOM node
   // Note: we are intentionally using the signature-less `Function` type here
   // since any type with signature will cause the whole inference to fail when
   // the return expression contains reference to `this`.
@@ -66,8 +67,8 @@ export interface ComponentOptionsBase<
   directives?: Record<string, Directive>
   inheritAttrs?: boolean
 
-  // type-only differentiator to separate OptionWihtoutProps from a constructor
-  // type returned by createComponent() or FunctionalComponent
+  // type-only differentiator to separate OptionWithoutProps from a constructor
+  // type returned by defineComponent() or FunctionalComponent
   call?: never
   // type-only differentiators for built-in Vnode types
   __isFragment?: never
@@ -146,7 +147,6 @@ type ComponentInjectOptions =
       string | symbol | { from: string | symbol; default?: unknown }
     >
 
-// TODO type inference for these options
 export interface LegacyOptions<
   Props,
   RawBindings,
@@ -215,7 +215,7 @@ export function applyOptions(
     instance.renderContext === EMPTY_OBJ
       ? (instance.renderContext = reactive({}))
       : instance.renderContext
-  const ctx = instance.renderProxy!
+  const ctx = instance.proxy!
   const {
     // composition
     mixins,
