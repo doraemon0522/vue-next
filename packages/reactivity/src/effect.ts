@@ -95,12 +95,12 @@ function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
   if (!effectStack.includes(effect)) {
     cleanup(effect)
     // try...finally的执行顺序:finally在try之后运行
-    // 首先try块中的activeReactiveEffectStack.push(effect)会最先执行
+    // 首先try块中的effectStack.push(effect)会最先执行
     // 这条语句不会报错，接下来返回调用fn
     // 如果这时候退出了函数，意味者finally不会运行代码。
     // 这里的return被推迟到了finally结束后，但fn(..args)也是在try块中调用的
-    // 下面代码的调用顺序是:activeReactiveEffectStack.push(effect) -> TemporarySave=fn(...args) -> 
-    // activeReactiveEffectStack.pop() -> return TemporarySave
+    // 下面代码的调用顺序是:effectStack.push(effect) -> TemporarySave=fn(...args) -> 
+    // effectStack.pop() -> return TemporarySave
     try {
       enableTracking()
       effectStack.push(effect)
@@ -153,29 +153,18 @@ export function track(target: object, type: TrackOpTypes, key: unknown) {
   }
   let dep = depsMap.get(key)
   if (dep === void 0) {
-<<<<<<< HEAD
-    depsMap.set(key!, (dep = new Set()))
-  }
-  if (!dep.has(effect)) {
-    // 双向存法 需要仔细理解~~
-    // 对于一个响应式数据，它在targetMap中存着一个Map数据（我称之为「响应依赖映射」）。
-    // 这个响应依赖映射的key是该响应式数据的某个属性值，value是所有用到这个响应数据属性值的所有监听函数，也即是Set集合dep。
-    dep.add(effect)
-    // 而对于一个监听函数，它会存放着 所有存着它自身的dep。
-    effect.deps.push(dep)
-    if (__DEV__ && effect.options.onTrack) {
-      effect.options.onTrack({
-        effect,
-=======
     depsMap.set(key, (dep = new Set()))
   }
   if (!dep.has(activeEffect)) {
+    // 双向存法 需要仔细理解~~
+    // 对于一个响应式数据，它在targetMap中存着一个Map数据（我称之为「响应依赖映射」）。
+    // 这个响应依赖映射的key是该响应式数据的某个属性值，value是所有用到这个响应数据属性值的所有监听函数，也即是Set集合dep。
     dep.add(activeEffect)
+    // 而对于一个监听函数，它会存放着 所有存着它自身的dep。
     activeEffect.deps.push(dep)
     if (__DEV__ && activeEffect.options.onTrack) {
       activeEffect.options.onTrack({
         effect: activeEffect,
->>>>>>> upstream/master
         target,
         type,
         key
