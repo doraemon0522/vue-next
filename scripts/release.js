@@ -15,7 +15,7 @@ const packages = fs
   .readdirSync(path.resolve(__dirname, '../packages'))
   .filter(p => !p.endsWith('.ts') && !p.startsWith('.'))
 
-const skippedPackages = ['server-renderer']
+const skippedPackages = []
 
 const versionIncrements = [
   'patch',
@@ -99,6 +99,9 @@ async function main() {
     console.log(`(skipped)`)
   }
 
+  // generate changelog
+  await run(`yarn`, ['changelog'])
+
   const { stdout } = await run('git', ['diff'], { stdio: 'pipe' })
   if (stdout) {
     step('\nCommitting changes...')
@@ -110,10 +113,8 @@ async function main() {
 
   // publish packages
   step('\nPublishing packages...')
-  const releaseTag = semver.prerelease(targetVersion)[0] || 'latest'
   for (const pkg of packages) {
-    step(`Publishing ${pkg}...`)
-    await publishPackage(pkg, targetVersion, releaseTag, runIfNotDry)
+    await publishPackage(pkg, targetVersion, runIfNotDry)
   }
 
   // push to GitHub
@@ -170,8 +171,8 @@ function updateDeps(pkg, depType, version) {
   })
 }
 
-async function publishPackage(pkgName, version, releaseTag, runIfNotDry) {
-  if (skippedPackages.includes[pkgName]) {
+async function publishPackage(pkgName, version, runIfNotDry) {
+  if (skippedPackages.includes(pkgName)) {
     return
   }
   const pkgRoot = getPkgRoot(pkgName)
@@ -180,6 +181,15 @@ async function publishPackage(pkgName, version, releaseTag, runIfNotDry) {
   if (pkg.private) {
     return
   }
+
+  // for now (alpha/beta phase), every package except "vue" can be published as
+  // `latest`, whereas "vue" will be published under the "next" tag.
+  const releaseTag = pkgName === 'vue' ? 'next' : null
+
+  // TODO use inferred release channel after official 3.0 release
+  // const releaseTag = semver.prerelease(version)[0] || null
+
+  step(`Publishing ${pkgName}...`)
   try {
     await runIfNotDry(
       'yarn',
@@ -187,8 +197,7 @@ async function publishPackage(pkgName, version, releaseTag, runIfNotDry) {
         'publish',
         '--new-version',
         version,
-        '--tag',
-        releaseTag,
+        ...(releaseTag ? ['--tag', releaseTag] : []),
         '--access',
         'public'
       ],

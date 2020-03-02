@@ -102,12 +102,14 @@ function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
     // 下面代码的调用顺序是:activeReactiveEffectStack.push(effect) -> TemporarySave=fn(...args) -> 
     // activeReactiveEffectStack.pop() -> return TemporarySave
     try {
+      enableTracking()
       effectStack.push(effect)
       activeEffect = effect
       //fn内引用了依赖数据，执行时，触发这些数据的get,从而走到track，因此effectStack堆栈尾部正好是该effect
       return fn(...args)
     } finally {
       effectStack.pop()
+      resetTracking()
       activeEffect = effectStack[effectStack.length - 1]
     }
   }
@@ -124,13 +126,21 @@ function cleanup(effect: ReactiveEffect) {
 }
 
 let shouldTrack = true
+const trackStack: boolean[] = []
 
 export function pauseTracking() {
+  trackStack.push(shouldTrack)
   shouldTrack = false
 }
 
-export function resumeTracking() {
+export function enableTracking() {
+  trackStack.push(shouldTrack)
   shouldTrack = true
+}
+
+export function resetTracking() {
+  const last = trackStack.pop()
+  shouldTrack = last === undefined ? true : last
 }
 
 export function track(target: object, type: TrackOpTypes, key: unknown) {
@@ -178,7 +188,9 @@ export function trigger(
   target: object,
   type: TriggerOpTypes,
   key?: unknown,
-  extraInfo?: DebuggerEventExtraInfo
+  newValue?: unknown,
+  oldValue?: unknown,
+  oldTarget?: Map<unknown, unknown> | Set<unknown>
 ) {
   const depsMap = targetMap.get(target)
   if (depsMap === void 0) {
@@ -188,23 +200,46 @@ export function trigger(
   const effects = new Set<ReactiveEffect>()
   const computedRunners = new Set<ReactiveEffect>()
   if (type === TriggerOpTypes.CLEAR) {
-    // collection being cleared, trigger all effects for target
+    // collection being cleared
+    // trigger all effects for target
     depsMap.forEach(dep => {
       addRunners(effects, computedRunners, dep)
+    })
+  } else if (key === 'length' && isArray(target)) {
+    depsMap.forEach((dep, key) => {
+      if (key === 'length' || key >= (newValue as number)) {
+        addRunners(effects, computedRunners, dep)
+      }
     })
   } else {
     // schedule runs for SET | ADD | DELETE
     if (key !== void 0) {
       addRunners(effects, computedRunners, depsMap.get(key))
     }
-    // also run for iteration key on ADD | DELETE
-    if (type === TriggerOpTypes.ADD || type === TriggerOpTypes.DELETE) {
+    // also run for iteration key on ADD | DELETE | Map.SET
+    if (
+      type === TriggerOpTypes.ADD ||
+      type === TriggerOpTypes.DELETE ||
+      (type === TriggerOpTypes.SET && target instanceof Map)
+    ) {
       const iterationKey = isArray(target) ? 'length' : ITERATE_KEY
       addRunners(effects, computedRunners, depsMap.get(iterationKey))
     }
   }
   const run = (effect: ReactiveEffect) => {
-    scheduleRun(effect, target, type, key, extraInfo)
+    scheduleRun(
+      effect,
+      target,
+      type,
+      key,
+      __DEV__
+        ? {
+            newValue,
+            oldValue,
+            oldTarget
+          }
+        : undefined
+    )
   }
   // Important: computed effects must be run first so that computed getters
   // can be invalidated before any normal effects that depend on them are run.
@@ -219,10 +254,16 @@ function addRunners(
 ) {
   if (effectsToAdd !== void 0) {
     effectsToAdd.forEach(effect => {
-      if (effect.options.computed) {
-        computedRunners.add(effect)
+      if (effect !== activeEffect) {
+        if (effect.options.computed) {
+          computedRunners.add(effect)
+        } else {
+          effects.add(effect)
+        }
       } else {
-        effects.add(effect)
+        // the effect mutated its own dependency during its execution.
+        // this can be caused by operations like foo.value++
+        // do not trigger or we end in an infinite loop
       }
     })
   }

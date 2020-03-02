@@ -1,4 +1,3 @@
-import fs from 'fs'
 import path from 'path'
 import ts from 'rollup-plugin-typescript2'
 import replace from '@rollup/plugin-replace'
@@ -15,10 +14,6 @@ const name = path.basename(packageDir)
 const resolve = p => path.resolve(packageDir, p)
 const pkg = require(resolve(`package.json`))
 const packageOptions = pkg.buildOptions || {}
-
-const knownExternals = fs.readdirSync(packagesDir).filter(p => {
-  return p !== '@vue/shared'
-})
 
 // ensure TS checks only once for each build
 let hasTSChecked = false
@@ -73,23 +68,22 @@ function createConfig(format, output, plugins = []) {
     process.exit(1)
   }
 
+  output.sourcemap = !!process.env.SOURCE_MAP
   output.externalLiveBindings = false
 
   const isProductionBuild =
     process.env.__DEV__ === 'false' || /\.prod\.js$/.test(output.file)
   const isGlobalBuild = format === 'global'
   const isRawESMBuild = format === 'esm'
+  const isNodeBuild = format === 'cjs'
   const isBundlerESMBuild = /esm-bundler/.test(format)
-  const isRuntimeCompileBuild = /vue\./.test(output.file)
+  const isRuntimeCompileBuild = packageOptions.isRuntimeCompileBuild
 
   if (isGlobalBuild) {
     output.name = packageOptions.name
   }
 
-  const shouldEmitDeclarations =
-    process.env.TYPES != null &&
-    process.env.NODE_ENV === 'production' &&
-    !hasTSChecked
+  const shouldEmitDeclarations = process.env.TYPES != null && !hasTSChecked
 
   const tsPlugin = ts({
     check: process.env.NODE_ENV === 'production' && !hasTSChecked,
@@ -97,6 +91,7 @@ function createConfig(format, output, plugins = []) {
     cacheRoot: path.resolve(__dirname, 'node_modules/.rts2_cache'),
     tsconfigOverride: {
       compilerOptions: {
+        sourceMap: output.sourcemap,
         declaration: shouldEmitDeclarations,
         declarationMap: shouldEmitDeclarations
       },
@@ -111,14 +106,21 @@ function createConfig(format, output, plugins = []) {
   const entryFile =
     format === 'esm-bundler-runtime' ? `src/runtime.ts` : `src/index.ts`
 
+  const external =
+    isGlobalBuild || isRawESMBuild ? [] : Object.keys(pkg.dependencies || {})
+
+  const nodePlugins = packageOptions.enableNonBrowserBranches
+    ? [
+        require('@rollup/plugin-node-resolve')(),
+        require('@rollup/plugin-commonjs')()
+      ]
+    : []
+
   return {
     input: resolve(entryFile),
     // Global and Browser ESM builds inlines everything so that they can be
     // used alone.
-    external:
-      isGlobalBuild || isRawESMBuild
-        ? []
-        : knownExternals.concat(Object.keys(pkg.dependencies || [])),
+    external,
     plugins: [
       json({
         namedExports: false
@@ -127,10 +129,14 @@ function createConfig(format, output, plugins = []) {
       createReplacePlugin(
         isProductionBuild,
         isBundlerESMBuild,
+        // isBrowserBuild?
         (isGlobalBuild || isRawESMBuild || isBundlerESMBuild) &&
           !packageOptions.enableNonBrowserBranches,
-        isRuntimeCompileBuild
+        isRuntimeCompileBuild,
+        isGlobalBuild,
+        isNodeBuild
       ),
+      ...nodePlugins,
       ...plugins
     ],
     output,
@@ -146,7 +152,9 @@ function createReplacePlugin(
   isProduction,
   isBundlerESMBuild,
   isBrowserBuild,
-  isRuntimeCompileBuild
+  isRuntimeCompileBuild,
+  isGlobalBuild,
+  isNodeBuild
 ) {
   const replacements = {
     __COMMIT__: `"${process.env.COMMIT}"`,
@@ -164,10 +172,21 @@ function createReplacePlugin(
     __BUNDLER__: isBundlerESMBuild,
     // support compile in browser?
     __RUNTIME_COMPILE__: isRuntimeCompileBuild,
+    __GLOBAL__: isGlobalBuild,
+    // is targeting Node (SSR)?
+    __NODE_JS__: isNodeBuild,
     // support options?
     // the lean build drops options related code with buildOptions.lean: true
     __FEATURE_OPTIONS__: !packageOptions.lean && !process.env.LEAN,
-    __FEATURE_SUSPENSE__: true
+    __FEATURE_SUSPENSE__: true,
+    ...(isProduction && isBrowserBuild
+      ? {
+          'context.onError(': `/*#__PURE__*/ context.onError(`,
+          'emitError(': `/*#__PURE__*/ emitError(`,
+          'createCompilerError(': `/*#__PURE__*/ createCompilerError(`,
+          'createDOMCompilerError(': `/*#__PURE__*/ createDOMCompilerError(`
+        }
+      : {})
   }
   // allow inline overrides like
   //__RUNTIME_COMPILE__=true yarn build runtime-core
@@ -196,7 +215,11 @@ function createMinifiedConfig(format) {
     },
     [
       terser({
-        module: /^esm/.test(format)
+        module: /^esm/.test(format),
+        compress: {
+          ecma: 2015,
+          pure_getters: true
+        }
       })
     ]
   )

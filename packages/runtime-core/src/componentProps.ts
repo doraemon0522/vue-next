@@ -11,7 +11,8 @@ import {
   hasOwn,
   toRawType,
   PatchFlags,
-  makeMap
+  makeMap,
+  isReservedProp
 } from '@vue/shared'
 import { warn } from './warning'
 import { Data, ComponentInternalInstance } from './component'
@@ -85,7 +86,7 @@ type NormalizedProp =
 type NormalizedPropsOptions = [Record<string, NormalizedProp>, string[]]
 
 // resolve raw VNode data.
-// - filter out reserved keys (key, ref, slots)
+// - filter out reserved keys (key, ref)
 // - extract class and style into $attrs (to be merged onto child
 //   component root)
 // - for the rest:
@@ -104,7 +105,8 @@ export function resolveProps(
 
   const { 0: options, 1: needCastKeys } = normalizePropsOptions(_options)!
   const props: Data = {}
-  let attrs: Data | undefined = void 0
+  let attrs: Data | undefined = undefined
+  let vnodeHooks: Data | undefined = undefined
 
   // update the instance propsProxy (passed to setup()) to trigger potential
   // changes
@@ -123,17 +125,28 @@ export function resolveProps(
 
   if (rawProps != null) {
     for (const key in rawProps) {
+      const value = rawProps[key]
       // key, ref are reserved and never passed down
-      if (key === 'key' || key === 'ref') continue
+      if (isReservedProp(key)) {
+        if (key !== 'key' && key !== 'ref') {
+          // vnode hooks.
+          ;(vnodeHooks || (vnodeHooks = {}))[key] = value
+        }
+        continue
+      }
       // prop option names are camelized during normalization, so to support
       // kebab -> camel conversion here we need to camelize the key.
-      const camelKey = camelize(key)
-      if (hasDeclaredProps && !hasOwn(options, camelKey)) {
-        // Any non-declared props are put into a separate `attrs` object
-        // for spreading. Make sure to preserve original key casing
-        ;(attrs || (attrs = {}))[key] = rawProps[key]
+      if (hasDeclaredProps) {
+        const camelKey = camelize(key)
+        if (hasOwn(options, camelKey)) {
+          setProp(camelKey, value)
+        } else {
+          // Any non-declared props are put into a separate `attrs` object
+          // for spreading. Make sure to preserve original key casing
+          ;(attrs || (attrs = {}))[key] = value
+        }
       } else {
-        setProp(camelKey, rawProps[key])
+        setProp(key, value)
       }
     }
   }
@@ -201,7 +214,8 @@ export function resolveProps(
   lock()
 
   instance.props = props
-  instance.attrs = options ? attrs || EMPTY_OBJ : props
+  instance.attrs = attrs || EMPTY_OBJ
+  instance.vnodeHooks = vnodeHooks || EMPTY_OBJ
 }
 
 const normalizationMap = new WeakMap<

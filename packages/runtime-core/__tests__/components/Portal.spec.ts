@@ -6,25 +6,22 @@ import {
   defineComponent,
   Portal,
   Text,
-  Fragment,
   ref,
   nextTick,
   TestElement,
   TestNode
 } from '@vue/runtime-test'
-import { VNodeChildren } from '../src/vnode'
+import { VNodeArrayChildren } from '../../src/vnode'
 
 describe('renderer: portal', () => {
   test('should work', () => {
     const target = nodeOps.createElement('div')
     const root = nodeOps.createElement('div')
 
-    const Comp = defineComponent(() => () =>
-      h(Fragment, [
-        h(Portal, { target }, h('div', 'teleported')),
-        h('div', 'root')
-      ])
-    )
+    const Comp = defineComponent(() => () => [
+      h(Portal, { target }, h('div', 'teleported')),
+      h('div', 'root')
+    ])
     render(h(Comp), root)
 
     expect(serializeInner(root)).toMatchSnapshot()
@@ -37,12 +34,10 @@ describe('renderer: portal', () => {
     const target = ref(targetA)
     const root = nodeOps.createElement('div')
 
-    const Comp = defineComponent(() => () =>
-      h(Fragment, [
-        h(Portal, { target: target.value }, h('div', 'teleported')),
-        h('div', 'root')
-      ])
-    )
+    const Comp = defineComponent(() => () => [
+      h(Portal, { target: target.value }, h('div', 'teleported')),
+      h('div', 'root')
+    ])
     render(h(Comp), root)
 
     expect(serializeInner(root)).toMatchSnapshot()
@@ -60,7 +55,7 @@ describe('renderer: portal', () => {
   test('should update children', async () => {
     const target = nodeOps.createElement('div')
     const root = nodeOps.createElement('div')
-    const children = ref<VNodeChildren<TestNode, TestElement>>([
+    const children = ref<VNodeArrayChildren<TestNode, TestElement>>([
       h('div', 'teleported')
     ])
 

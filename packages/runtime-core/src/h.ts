@@ -2,11 +2,11 @@ import {
   VNode,
   VNodeProps,
   createVNode,
-  VNodeChildren,
+  VNodeArrayChildren,
   Fragment,
-  Portal,
   isVNode
 } from './vnode'
+import { Portal, PortalProps } from './components/Portal'
 import { Suspense, SuspenseProps } from './components/Suspense'
 import { isObject, isArray } from '@vue/shared'
 import { RawSlots } from './componentSlots'
@@ -62,7 +62,7 @@ type RawChildren =
   | number
   | boolean
   | VNode
-  | VNodeChildren
+  | VNodeArrayChildren
   | (() => any)
 
 // fake constructor type returned from `defineComponent`
@@ -85,17 +85,17 @@ export function h(
 ): VNode
 
 // fragment
-export function h(type: typeof Fragment, children?: VNodeChildren): VNode
+export function h(type: typeof Fragment, children?: VNodeArrayChildren): VNode
 export function h(
   type: typeof Fragment,
   props?: RawProps | null,
-  children?: VNodeChildren
+  children?: VNodeArrayChildren
 ): VNode
 
 // portal (target prop is required)
 export function h(
   type: typeof Portal,
-  props: RawProps & { target: any },
+  props: RawProps & PortalProps,
   children: RawChildren
 ): VNode
 

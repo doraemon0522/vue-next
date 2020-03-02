@@ -4,7 +4,11 @@ import {
   isString,
   isObject,
   EMPTY_ARR,
-  extend
+  extend,
+  normalizeClass,
+  normalizeStyle,
+  PatchFlags,
+  ShapeFlags
 } from '@vue/shared'
 import {
   ComponentInternalInstance,
@@ -13,15 +17,18 @@ import {
   Component
 } from './component'
 import { RawSlots } from './componentSlots'
-import { ShapeFlags } from './shapeFlags'
 import { isReactive, Ref } from '@vue/reactivity'
 import { AppContext } from './apiCreateApp'
-import { SuspenseBoundary } from './components/Suspense'
+import {
+  SuspenseImpl,
+  isSuspense,
+  SuspenseBoundary
+} from './components/Suspense'
 import { DirectiveBinding } from './directives'
-import { SuspenseImpl } from './components/Suspense'
 import { TransitionHooks } from './components/BaseTransition'
 import { warn } from './warning'
 import { currentScopeId } from './helpers/scopeId'
+import { PortalImpl, isPortal } from './components/Portal'
 
 export const Fragment = (Symbol(__DEV__ ? 'Fragment' : undefined) as any) as {
   __isFragment: true
@@ -29,22 +36,18 @@ export const Fragment = (Symbol(__DEV__ ? 'Fragment' : undefined) as any) as {
     $props: VNodeProps
   }
 }
-export const Portal = (Symbol(__DEV__ ? 'Portal' : undefined) as any) as {
-  __isPortal: true
-  new (): {
-    $props: VNodeProps & { target: string | object }
-  }
-}
 export const Text = Symbol(__DEV__ ? 'Text' : undefined)
 export const Comment = Symbol(__DEV__ ? 'Comment' : undefined)
+export const Static = Symbol(__DEV__ ? 'Static' : undefined)
 
 export type VNodeTypes =
   | string
   | Component
-  | typeof Fragment
-  | typeof Portal
   | typeof Text
+  | typeof Static
   | typeof Comment
+  | typeof Fragment
+  | typeof PortalImpl
   | typeof SuspenseImpl
 
 export interface VNodeProps {
@@ -69,19 +72,19 @@ type VNodeChildAtom<HostNode, HostElement> =
   | null
   | void
 
-export interface VNodeChildren<HostNode = any, HostElement = any>
+export interface VNodeArrayChildren<HostNode = any, HostElement = any>
   extends Array<
-      | VNodeChildren<HostNode, HostElement>
+      | VNodeArrayChildren<HostNode, HostElement>
       | VNodeChildAtom<HostNode, HostElement>
     > {}
 
 export type VNodeChild<HostNode = any, HostElement = any> =
   | VNodeChildAtom<HostNode, HostElement>
-  | VNodeChildren<HostNode, HostElement>
+  | VNodeArrayChildren<HostNode, HostElement>
 
-export type NormalizedChildren<HostNode = any, HostElement = any> =
+export type VNodeNormalizedChildren<HostNode = any, HostElement = any> =
   | string
-  | VNodeChildren<HostNode, HostElement>
+  | VNodeArrayChildren<HostNode, HostElement>
   | RawSlots
   | null
 
@@ -92,7 +95,7 @@ export interface VNode<HostNode = any, HostElement = any> {
   key: string | number | null
   ref: string | Ref | ((ref: object | null) => void) | null
   scopeId: string | null // SFC only
-  children: NormalizedChildren<HostNode, HostElement>
+  children: VNodeNormalizedChildren<HostNode, HostElement>
   component: ComponentInternalInstance | null
   suspense: SuspenseBoundary<HostNode, HostElement> | null
   dirs: DirectiveBinding[] | null
@@ -132,7 +135,7 @@ let currentBlock: VNode[] | null = null
 //
 // disableTracking is true when creating a fragment block, since a fragment
 // always diffs its children.
-export function openBlock(disableTracking?: boolean) {
+export function openBlock(disableTracking = false) {
   blockStack.push((currentBlock = disableTracking ? null : []))
 }
 
@@ -221,7 +224,7 @@ export function createVNode(
     if (klass != null && !isString(klass)) {
       props.class = normalizeClass(klass)
     }
-    if (style != null) {
+    if (isObject(style)) {
       // reactive state objects need to be cloned since they are likely to be
       // mutated
       if (isReactive(style) && !isArray(style)) {
@@ -234,13 +237,15 @@ export function createVNode(
   // encode the vnode type information into a bitmap
   const shapeFlag = isString(type)
     ? ShapeFlags.ELEMENT
-    : __FEATURE_SUSPENSE__ && (type as any).__isSuspense === true
+    : __FEATURE_SUSPENSE__ && isSuspense(type)
       ? ShapeFlags.SUSPENSE
-      : isObject(type)
-        ? ShapeFlags.STATEFUL_COMPONENT
-        : isFunction(type)
-          ? ShapeFlags.FUNCTIONAL_COMPONENT
-          : 0
+      : isPortal(type)
+        ? ShapeFlags.PORTAL
+        : isObject(type)
+          ? ShapeFlags.STATEFUL_COMPONENT
+          : isFunction(type)
+            ? ShapeFlags.FUNCTIONAL_COMPONENT
+            : 0
 
   const vnode: VNode = {
     _isVNode: true,
@@ -273,7 +278,11 @@ export function createVNode(
   if (
     shouldTrack > 0 &&
     currentBlock !== null &&
+    // the EVENTS flag is only for hydration and if it is the only flag, the
+    // vnode should not be considered dynamic due to handler caching.
+    patchFlag !== PatchFlags.HYDRATE_EVENTS &&
     (patchFlag > 0 ||
+      shapeFlag & ShapeFlags.SUSPENSE ||
       shapeFlag & ShapeFlags.STATEFUL_COMPONENT ||
       shapeFlag & ShapeFlags.FUNCTIONAL_COMPONENT)
   ) {
@@ -325,6 +334,10 @@ export function createTextVNode(text: string = ' ', flag: number = 0): VNode {
   return createVNode(Text, null, text, flag)
 }
 
+export function createStaticVNode(content: string): VNode {
+  return createVNode(Static, null, content)
+}
+
 export function createCommentVNode(
   text: string = '',
   // when used as the v-else branch, the comment node must be created as a
@@ -332,12 +345,12 @@ export function createCommentVNode(
   asBlock: boolean = false
 ): VNode {
   return asBlock
-    ? createBlock(Comment, null, text)
+    ? (openBlock(), createBlock(Comment, null, text))
     : createVNode(Comment, null, text)
 }
 
 export function normalizeVNode<T, U>(child: VNodeChild<T, U>): VNode<T, U> {
-  if (child == null) {
+  if (child == null || typeof child === 'boolean') {
     // empty placeholder
     return createVNode(Comment)
   } else if (isArray(child)) {
@@ -348,7 +361,7 @@ export function normalizeVNode<T, U>(child: VNodeChild<T, U>): VNode<T, U> {
     // always produce all-vnode children arrays
     return child.el === null ? child : cloneVNode(child)
   } else {
-    // primitive types
+    // strings and numbers
     return createVNode(Text, null, String(child))
   }
 }
@@ -373,45 +386,8 @@ export function normalizeChildren(vnode: VNode, children: unknown) {
     children = String(children)
     type = ShapeFlags.TEXT_CHILDREN
   }
-  vnode.children = children as NormalizedChildren
+  vnode.children = children as VNodeNormalizedChildren
   vnode.shapeFlag |= type
-}
-
-function normalizeStyle(
-  value: unknown
-): Record<string, string | number> | void {
-  if (isArray(value)) {
-    const res: Record<string, string | number> = {}
-    for (let i = 0; i < value.length; i++) {
-      const normalized = normalizeStyle(value[i])
-      if (normalized) {
-        for (const key in normalized) {
-          res[key] = normalized[key]
-        }
-      }
-    }
-    return res
-  } else if (isObject(value)) {
-    return value
-  }
-}
-
-export function normalizeClass(value: unknown): string {
-  let res = ''
-  if (isString(value)) {
-    res = value
-  } else if (isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      res += normalizeClass(value[i]) + ' '
-    }
-  } else if (isObject(value)) {
-    for (const name in value) {
-      if (value[name]) {
-        res += name + ' '
-      }
-    }
-  }
-  return res.trim()
 }
 
 const handlersRE = /^on|^vnode/
@@ -423,15 +399,20 @@ export function mergeProps(...args: (Data & VNodeProps)[]) {
     const toMerge = args[i]
     for (const key in toMerge) {
       if (key === 'class') {
-        ret.class = normalizeClass([ret.class, toMerge.class])
+        if (ret.class !== toMerge.class) {
+          ret.class = normalizeClass([ret.class, toMerge.class])
+        }
       } else if (key === 'style') {
         ret.style = normalizeStyle([ret.style, toMerge.style])
       } else if (handlersRE.test(key)) {
         // on*, vnode*
         const existing = ret[key]
-        ret[key] = existing
-          ? [].concat(existing as any, toMerge[key] as any)
-          : toMerge[key]
+        const incoming = toMerge[key]
+        if (existing !== incoming) {
+          ret[key] = existing
+            ? [].concat(existing as any, toMerge[key] as any)
+            : incoming
+        }
       } else {
         ret[key] = toMerge[key]
       }

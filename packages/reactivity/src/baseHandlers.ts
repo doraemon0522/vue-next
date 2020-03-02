@@ -2,7 +2,7 @@ import { reactive, readonly, toRaw } from './reactive'
 import { TrackOpTypes, TriggerOpTypes } from './operations'
 import { track, trigger, ITERATE_KEY } from './effect'
 import { LOCKED } from './lock'
-import { isObject, hasOwn, isSymbol, hasChanged } from '@vue/shared'
+import { isObject, hasOwn, isSymbol, hasChanged, isArray } from '@vue/shared'
 import { isRef } from './ref'
 
 const builtInSymbols = new Set(
@@ -12,11 +12,26 @@ const builtInSymbols = new Set(
 )
 
 const get = /*#__PURE__*/ createGetter()
+const shallowReactiveGet = /*#__PURE__*/ createGetter(false, true)
 const readonlyGet = /*#__PURE__*/ createGetter(true)
 const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true)
 
+const arrayInstrumentations: Record<string, Function> = {}
+;['includes', 'indexOf', 'lastIndexOf'].forEach(key => {
+  arrayInstrumentations[key] = function(...args: any[]): any {
+    const arr = toRaw(this) as any
+    for (let i = 0, l = (this as any).length; i < l; i++) {
+      track(arr, TrackOpTypes.GET, i + '')
+    }
+    return arr[key](...args.map(toRaw))
+  }
+})
+
 function createGetter(isReadonly = false, shallow = false) {
   return function get(target: object, key: string | symbol, receiver: object) {
+    if (isArray(target) && hasOwn(arrayInstrumentations, key)) {
+      return Reflect.get(arrayInstrumentations, key, receiver)
+    }
     const res = Reflect.get(target, key, receiver)
     if (isSymbol(key) && builtInSymbols.has(key)) {
       return res
@@ -26,7 +41,8 @@ function createGetter(isReadonly = false, shallow = false) {
       // TODO strict mode that returns a shallow-readonly version of the value
       return res
     }
-    if (isRef(res)) {
+    // ref unwrapping, only for Objects, not for Arrays.
+    if (isRef(res) && !isArray(target)) {
       return res.value
     }
     track(target, TrackOpTypes.GET, key)
@@ -41,6 +57,7 @@ function createGetter(isReadonly = false, shallow = false) {
 }
 
 const set = /*#__PURE__*/ createSetter()
+const shallowReactiveSet = /*#__PURE__*/ createSetter(false, true)
 const readonlySet = /*#__PURE__*/ createSetter(true)
 const shallowReadonlySet = /*#__PURE__*/ createSetter(true, true)
 
@@ -64,7 +81,7 @@ function createSetter(isReadonly = false, shallow = false) {
     const oldValue = (target as any)[key]
     if (!shallow) {
       value = toRaw(value)
-      if (isRef(oldValue) && !isRef(value)) {
+      if (!isArray(target) && isRef(oldValue) && !isRef(value)) {
         oldValue.value = value
         return true
       }
@@ -76,20 +93,10 @@ function createSetter(isReadonly = false, shallow = false) {
     const result = Reflect.set(target, key, value, receiver)
     // don't trigger if target is something up in the prototype chain of original
     if (target === toRaw(receiver)) {
-      /* istanbul ignore else */
-      if (__DEV__) {
-        const extraInfo = { oldValue, newValue: value }
-        if (!hadKey) {
-          trigger(target, TriggerOpTypes.ADD, key, extraInfo)
-        } else if (hasChanged(value, oldValue)) {
-          trigger(target, TriggerOpTypes.SET, key, extraInfo)
-        }
-      } else {
-        if (!hadKey) {
-          trigger(target, TriggerOpTypes.ADD, key)
-        } else if (hasChanged(value, oldValue)) {
-          trigger(target, TriggerOpTypes.SET, key)
-        }
+      if (!hadKey) {
+        trigger(target, TriggerOpTypes.ADD, key, value)
+      } else if (hasChanged(value, oldValue)) {
+        trigger(target, TriggerOpTypes.SET, key, value, oldValue)
       }
     }
     return result
@@ -101,12 +108,7 @@ function deleteProperty(target: object, key: string | symbol): boolean {
   const oldValue = (target as any)[key]
   const result = Reflect.deleteProperty(target, key)
   if (result && hadKey) {
-    /* istanbul ignore else */
-    if (__DEV__) {
-      trigger(target, TriggerOpTypes.DELETE, key, { oldValue })
-    } else {
-      trigger(target, TriggerOpTypes.DELETE, key)
-    }
+    trigger(target, TriggerOpTypes.DELETE, key, undefined, oldValue)
   }
   return result
 }
@@ -152,7 +154,13 @@ export const readonlyHandlers: ProxyHandler<object> = {
   }
 }
 
-// props handlers are special in the sense that it should not unwrap top-level
+export const shallowReactiveHandlers: ProxyHandler<object> = {
+  ...mutableHandlers,
+  get: shallowReactiveGet,
+  set: shallowReactiveSet
+}
+
+// Props handlers are special in the sense that it should not unwrap top-level
 // refs (in order to allow refs to be explicitly passed down), but should
 // retain the reactivity of the normal readonly object.
 export const shallowReadonlyHandlers: ProxyHandler<object> = {

@@ -9,13 +9,13 @@ import {
   Comment,
   isSameVNodeType,
   VNode,
-  VNodeChildren
+  VNodeArrayChildren
 } from '../vnode'
 import { warn } from '../warning'
 import { isKeepAlive } from './KeepAlive'
 import { toRaw } from '@vue/reactivity'
 import { callWithAsyncErrorHandling, ErrorCodes } from '../errorHandling'
-import { ShapeFlags } from '../shapeFlags'
+import { ShapeFlags } from '@vue/shared'
 import { onBeforeUnmount, onMounted } from '../apiLifecycle'
 
 export interface BaseTransitionProps {
@@ -370,7 +370,7 @@ function emptyPlaceholder(vnode: VNode): VNode | undefined {
 function getKeepAliveChild(vnode: VNode): VNode | undefined {
   return isKeepAlive(vnode)
     ? vnode.children
-      ? ((vnode.children as VNodeChildren)[0] as VNode)
+      ? ((vnode.children as VNodeArrayChildren)[0] as VNode)
       : undefined
     : vnode
 }

@@ -526,7 +526,6 @@ describe('compiler: parse', () => {
         tagType: ElementTypes.ELEMENT,
         codegenNode: undefined,
         props: [],
-
         isSelfClosing: false,
         children: [],
         loc: {
@@ -580,6 +579,24 @@ describe('compiler: parse', () => {
           end: { offset: 5, line: 1, column: 6 },
           source: '<img>'
         }
+      })
+    })
+
+    test('template element with directives', () => {
+      const ast = baseParse('<template v-if="ok"></template>')
+      const element = ast.children[0]
+      expect(element).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tagType: ElementTypes.TEMPLATE
+      })
+    })
+
+    test('template element without directives', () => {
+      const ast = baseParse('<template></template>')
+      const element = ast.children[0]
+      expect(element).toMatchObject({
+        type: NodeTypes.ELEMENT,
+        tagType: ElementTypes.ELEMENT
       })
     })
 
@@ -2590,17 +2607,6 @@ foo
             {
               type: ErrorCodes.UNEXPECTED_SOLIDUS_IN_TAG,
               loc: { offset: 16, line: 1, column: 17 }
-            }
-          ]
-        }
-      ],
-      UNKNOWN_NAMED_CHARACTER_REFERENCE: [
-        {
-          code: '<template>&unknown;</template>',
-          errors: [
-            {
-              type: ErrorCodes.UNKNOWN_NAMED_CHARACTER_REFERENCE,
-              loc: { offset: 10, line: 1, column: 11 }
             }
           ]
         }

@@ -3,7 +3,6 @@ import {
   h,
   nodeOps,
   serializeInner,
-  mockWarn,
   provide,
   inject,
   resolveComponent,
@@ -13,6 +12,7 @@ import {
   ref,
   getCurrentInstance
 } from '@vue/runtime-test'
+import { mockWarn } from '@vue/shared'
 
 describe('api: createApp', () => {
   mockWarn()
@@ -30,27 +30,43 @@ describe('api: createApp', () => {
     }
 
     const root1 = nodeOps.createElement('div')
-    createApp().mount(Comp, root1)
+    createApp(Comp).mount(root1)
     expect(serializeInner(root1)).toBe(`0`)
 
     // mount with props
     const root2 = nodeOps.createElement('div')
-    const app2 = createApp()
-    app2.mount(Comp, root2, { count: 1 })
+    const app2 = createApp(Comp, { count: 1 })
+    app2.mount(root2)
     expect(serializeInner(root2)).toBe(`1`)
 
     // remount warning
     const root3 = nodeOps.createElement('div')
-    app2.mount(Comp, root3)
+    app2.mount(root3)
     expect(serializeInner(root3)).toBe(``)
     expect(`already been mounted`).toHaveBeenWarned()
   })
 
-  test('provide', () => {
-    const app = createApp()
-    app.provide('foo', 1)
-    app.provide('bar', 2)
+  test('unmount', () => {
+    const Comp = {
+      props: {
+        count: {
+          default: 0
+        }
+      },
+      setup(props: { count: number }) {
+        return () => props.count
+      }
+    }
 
+    const root = nodeOps.createElement('div')
+    const app = createApp(Comp)
+    app.mount(root)
+
+    app.unmount(root)
+    expect(serializeInner(root)).toBe(``)
+  })
+
+  test('provide', () => {
     const Root = {
       setup() {
         // test override
@@ -63,29 +79,24 @@ describe('api: createApp', () => {
       setup() {
         const foo = inject('foo')
         const bar = inject('bar')
+        try {
+          inject('__proto__')
+        } catch (e) {}
         return () => `${foo},${bar}`
       }
     }
 
+    const app = createApp(Root)
+    app.provide('foo', 1)
+    app.provide('bar', 2)
+
     const root = nodeOps.createElement('div')
-    app.mount(Root, root)
+    app.mount(root)
     expect(serializeInner(root)).toBe(`3,2`)
+    expect('[Vue warn]: injection "__proto__" not found.').toHaveBeenWarned()
   })
 
   test('component', () => {
-    const app = createApp()
-
-    const FooBar = () => 'foobar!'
-    app.component('FooBar', FooBar)
-    expect(app.component('FooBar')).toBe(FooBar)
-
-    app.component('BarBaz', () => 'barbaz!')
-
-    app.component('BarBaz', () => 'barbaz!')
-    expect(
-      'Component "BarBaz" has already been registered in target app.'
-    ).toHaveBeenWarnedTimes(1)
-
     const Root = {
       // local override
       components: {
@@ -102,32 +113,28 @@ describe('api: createApp', () => {
       }
     }
 
+    const app = createApp(Root)
+
+    const FooBar = () => 'foobar!'
+    app.component('FooBar', FooBar)
+    expect(app.component('FooBar')).toBe(FooBar)
+
+    app.component('BarBaz', () => 'barbaz!')
+
+    app.component('BarBaz', () => 'barbaz!')
+    expect(
+      'Component "BarBaz" has already been registered in target app.'
+    ).toHaveBeenWarnedTimes(1)
+
     const root = nodeOps.createElement('div')
-    app.mount(Root, root)
+    app.mount(root)
     expect(serializeInner(root)).toBe(`<div>foobar!barbaz-local!</div>`)
   })
 
   test('directive', () => {
-    const app = createApp()
-
     const spy1 = jest.fn()
     const spy2 = jest.fn()
     const spy3 = jest.fn()
-
-    const FooBar = { mounted: spy1 }
-    app.directive('FooBar', FooBar)
-    expect(app.directive('FooBar')).toBe(FooBar)
-
-    app.directive('BarBaz', {
-      mounted: spy2
-    })
-
-    app.directive('BarBaz', {
-      mounted: spy2
-    })
-    expect(
-      'Directive "BarBaz" has already been registered in target app.'
-    ).toHaveBeenWarnedTimes(1)
 
     const Root = {
       // local override
@@ -145,8 +152,25 @@ describe('api: createApp', () => {
       }
     }
 
+    const app = createApp(Root)
+
+    const FooBar = { mounted: spy1 }
+    app.directive('FooBar', FooBar)
+    expect(app.directive('FooBar')).toBe(FooBar)
+
+    app.directive('BarBaz', {
+      mounted: spy2
+    })
+
+    app.directive('BarBaz', {
+      mounted: spy2
+    })
+    expect(
+      'Directive "BarBaz" has already been registered in target app.'
+    ).toHaveBeenWarnedTimes(1)
+
     const root = nodeOps.createElement('div')
-    app.mount(Root, root)
+    app.mount(root)
     expect(spy1).toHaveBeenCalled()
     expect(spy2).not.toHaveBeenCalled()
     expect(spy3).toHaveBeenCalled()
@@ -212,7 +236,7 @@ describe('api: createApp', () => {
       }
     }
 
-    const app = createApp()
+    const app = createApp(Comp)
     app.mixin(mixinA)
     app.mixin(mixinB)
 
@@ -226,7 +250,7 @@ describe('api: createApp', () => {
     ).toHaveBeenWarnedTimes(1)
 
     const root = nodeOps.createElement('div')
-    app.mount(Comp, root)
+    app.mount(root)
 
     expect(serializeInner(root)).toBe(`123`)
     expect(calls).toEqual([
@@ -244,11 +268,13 @@ describe('api: createApp', () => {
     const PluginB: Plugin = {
       install: (app, arg1, arg2) => app.provide('bar', arg1 + arg2)
     }
-    const PluginC: any = undefined
-
-    const app = createApp()
-    app.use(PluginA)
-    app.use(PluginB, 1, 1)
+    class PluginC {
+      someProperty = {}
+      static install() {
+        app.provide('baz', 2)
+      }
+    }
+    const PluginD: any = undefined
 
     const Root = {
       setup() {
@@ -257,8 +283,14 @@ describe('api: createApp', () => {
         return () => `${foo},${bar}`
       }
     }
+
+    const app = createApp(Root)
+    app.use(PluginA)
+    app.use(PluginB, 1, 1)
+    app.use(PluginC)
+
     const root = nodeOps.createElement('div')
-    app.mount(Root, root)
+    app.mount(root)
     expect(serializeInner(root)).toBe(`1,2`)
 
     app.use(PluginA)
@@ -266,7 +298,7 @@ describe('api: createApp', () => {
       `Plugin has already been applied to target app`
     ).toHaveBeenWarnedTimes(1)
 
-    app.use(PluginC)
+    app.use(PluginD)
     expect(
       `A plugin must either be a function or an object with an "install" ` +
         `function.`
@@ -274,18 +306,14 @@ describe('api: createApp', () => {
   })
 
   test('config.errorHandler', () => {
-    const app = createApp()
-
     const error = new Error()
     const count = ref(0)
 
-    const handler = (app.config.errorHandler = jest.fn(
-      (err, instance, info) => {
-        expect(err).toBe(error)
-        expect((instance as any).count).toBe(count.value)
-        expect(info).toBe(`render function`)
-      }
-    ))
+    const handler = jest.fn((err, instance, info) => {
+      expect(err).toBe(error)
+      expect((instance as any).count).toBe(count.value)
+      expect(info).toBe(`render function`)
+    })
 
     const Root = {
       setup() {
@@ -299,21 +327,19 @@ describe('api: createApp', () => {
       }
     }
 
-    app.mount(Root, nodeOps.createElement('div'))
+    const app = createApp(Root)
+    app.config.errorHandler = handler
+    app.mount(nodeOps.createElement('div'))
     expect(handler).toHaveBeenCalled()
   })
 
   test('config.warnHandler', () => {
-    const app = createApp()
     let ctx: any
-
-    const handler = (app.config.warnHandler = jest.fn(
-      (msg, instance, trace) => {
-        expect(msg).toMatch(`Component is missing template or render function`)
-        expect(instance).toBe(ctx.proxy)
-        expect(trace).toMatch(`Hello`)
-      }
-    ))
+    const handler = jest.fn((msg, instance, trace) => {
+      expect(msg).toMatch(`Component is missing template or render function`)
+      expect(instance).toBe(ctx.proxy)
+      expect(trace).toMatch(`Hello`)
+    })
 
     const Root = {
       name: 'Hello',
@@ -322,7 +348,9 @@ describe('api: createApp', () => {
       }
     }
 
-    app.mount(Root, nodeOps.createElement('div'))
+    const app = createApp(Root)
+    app.config.warnHandler = handler
+    app.mount(nodeOps.createElement('div'))
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
@@ -330,104 +358,82 @@ describe('api: createApp', () => {
     const isNativeTag = jest.fn(tag => tag === 'div')
 
     test('Component.name', () => {
-      const app = createApp()
-      Object.defineProperty(app.config, 'isNativeTag', {
-        value: isNativeTag,
-        writable: false
-      })
-
       const Root = {
         name: 'div',
-        setup() {
-          return {
-            count: ref(0)
-          }
-        },
         render() {
           return null
         }
       }
 
-      app.mount(Root, nodeOps.createElement('div'))
+      const app = createApp(Root)
+
+      Object.defineProperty(app.config, 'isNativeTag', {
+        value: isNativeTag,
+        writable: false
+      })
+
+      app.mount(nodeOps.createElement('div'))
       expect(
         `Do not use built-in or reserved HTML elements as component id: div`
       ).toHaveBeenWarned()
     })
 
     test('Component.components', () => {
-      const app = createApp()
-      Object.defineProperty(app.config, 'isNativeTag', {
-        value: isNativeTag,
-        writable: false
-      })
-
       const Root = {
         components: {
           div: () => 'div'
-        },
-        setup() {
-          return {
-            count: ref(0)
-          }
         },
         render() {
           return null
         }
       }
 
-      app.mount(Root, nodeOps.createElement('div'))
+      const app = createApp(Root)
+      Object.defineProperty(app.config, 'isNativeTag', {
+        value: isNativeTag,
+        writable: false
+      })
+
+      app.mount(nodeOps.createElement('div'))
       expect(
         `Do not use built-in or reserved HTML elements as component id: div`
       ).toHaveBeenWarned()
     })
 
     test('Component.directives', () => {
-      const app = createApp()
-      Object.defineProperty(app.config, 'isNativeTag', {
-        value: isNativeTag,
-        writable: false
-      })
-
       const Root = {
         directives: {
           bind: () => {}
-        },
-        setup() {
-          return {
-            count: ref(0)
-          }
         },
         render() {
           return null
         }
       }
 
-      app.mount(Root, nodeOps.createElement('div'))
+      const app = createApp(Root)
+      Object.defineProperty(app.config, 'isNativeTag', {
+        value: isNativeTag,
+        writable: false
+      })
+
+      app.mount(nodeOps.createElement('div'))
       expect(
         `Do not use built-in directive ids as custom directive id: bind`
       ).toHaveBeenWarned()
     })
 
     test('register using app.component', () => {
-      const app = createApp()
+      const app = createApp({
+        render() {}
+      })
+
       Object.defineProperty(app.config, 'isNativeTag', {
         value: isNativeTag,
         writable: false
       })
 
-      const Root = {
-        setup() {
-          return {
-            count: ref(0)
-          }
-        },
-        render() {
-          return null
-        }
-      }
-
       app.component('div', () => 'div')
-      app.mount(Root, nodeOps.createElement('div'))
+      app.mount(nodeOps.createElement('div'))
       expect(
         `Do not use built-in or reserved HTML elements as component id: div`
       ).toHaveBeenWarned()

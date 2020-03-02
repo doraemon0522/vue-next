@@ -1,5 +1,12 @@
 import { expectError, expectType } from 'tsd'
-import { describe, defineComponent, PropType, ref, createApp } from './index'
+import {
+  describe,
+  defineComponent,
+  PropType,
+  ref,
+  reactive,
+  createApp
+} from './index'
 
 describe('with object props', () => {
   interface ExpectedProps {
@@ -11,6 +18,8 @@ describe('with object props', () => {
     ccc?: string[] | undefined
     ddd: string[]
   }
+
+  type GT = string & { __brand: unknown }
 
   const MyComponent = defineComponent({
     props: {
@@ -57,7 +66,10 @@ describe('with object props', () => {
         c: ref(1),
         d: {
           e: ref('hi')
-        }
+        },
+        f: reactive({
+          g: ref('hello' as GT)
+        })
       }
     },
     render() {
@@ -88,6 +100,7 @@ describe('with object props', () => {
       // assert setup context unwrapping
       expectType<number>(this.c)
       expectType<string>(this.d.e)
+      expectType<GT>(this.f.g)
 
       // setup context properties should be mutable
       this.c = 2
@@ -243,12 +256,12 @@ describe('type inference w/ options API', () => {
 
 describe('compatibility w/ createApp', () => {
   const comp = defineComponent({})
-  createApp().mount(comp, '#hello')
+  createApp(comp).mount('#hello')
 
   const comp2 = defineComponent({
     props: { foo: String }
   })
-  createApp().mount(comp2, '#hello')
+  createApp(comp2).mount('#hello')
 
   const comp3 = defineComponent({
     setup() {
@@ -257,5 +270,14 @@ describe('compatibility w/ createApp', () => {
       }
     }
   })
-  createApp().mount(comp3, '#hello')
+  createApp(comp3).mount('#hello')
+})
+
+describe('defineComponent', () => {
+  test('should accept components defined with defineComponent', () => {
+    const comp = defineComponent({})
+    defineComponent({
+      components: { comp }
+    })
+  })
 })

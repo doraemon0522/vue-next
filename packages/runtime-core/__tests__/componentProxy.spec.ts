@@ -1,16 +1,11 @@
-import {
-  createApp,
-  getCurrentInstance,
-  nodeOps,
-  mockWarn
-} from '@vue/runtime-test'
+import { h, render, getCurrentInstance, nodeOps } from '@vue/runtime-test'
+import { mockWarn } from '@vue/shared'
 import { ComponentInternalInstance } from '../src/component'
 
 describe('component: proxy', () => {
   mockWarn()
 
   test('data', () => {
-    const app = createApp()
     let instance: ComponentInternalInstance
     let instanceProxy: any
     const Comp = {
@@ -27,14 +22,13 @@ describe('component: proxy', () => {
         return null
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'))
+    render(h(Comp), nodeOps.createElement('div'))
     expect(instanceProxy.foo).toBe(1)
     instanceProxy.foo = 2
     expect(instance!.data.foo).toBe(2)
   })
 
   test('renderContext', () => {
-    const app = createApp()
     let instance: ComponentInternalInstance
     let instanceProxy: any
     const Comp = {
@@ -51,14 +45,13 @@ describe('component: proxy', () => {
         return null
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'))
+    render(h(Comp), nodeOps.createElement('div'))
     expect(instanceProxy.foo).toBe(1)
     instanceProxy.foo = 2
     expect(instance!.renderContext.foo).toBe(2)
   })
 
   test('propsProxy', () => {
-    const app = createApp()
     let instance: ComponentInternalInstance
     let instanceProxy: any
     const Comp = {
@@ -76,15 +69,28 @@ describe('component: proxy', () => {
         instanceProxy = this
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'))
+    render(h(Comp), nodeOps.createElement('div'))
     expect(instanceProxy.foo).toBe(1)
     expect(instance!.propsProxy!.foo).toBe(1)
     expect(() => (instanceProxy.foo = 2)).toThrow(TypeError)
     expect(`Attempting to mutate prop "foo"`).toHaveBeenWarned()
   })
 
+  test('should not expose non-declared props', () => {
+    let instanceProxy: any
+    const Comp = {
+      setup() {
+        return () => null
+      },
+      mounted() {
+        instanceProxy = this
+      }
+    }
+    render(h(Comp, { count: 1 }), nodeOps.createElement('div'))
+    expect('count' in instanceProxy).toBe(false)
+  })
+
   test('public properties', () => {
-    const app = createApp()
     let instance: ComponentInternalInstance
     let instanceProxy: any
     const Comp = {
@@ -96,7 +102,7 @@ describe('component: proxy', () => {
         instanceProxy = this
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'))
+    render(h(Comp), nodeOps.createElement('div'))
     expect(instanceProxy.$data).toBe(instance!.data)
     expect(instanceProxy.$props).toBe(instance!.propsProxy)
     expect(instanceProxy.$attrs).toBe(instance!.attrs)
@@ -112,7 +118,6 @@ describe('component: proxy', () => {
   })
 
   test('sink', async () => {
-    const app = createApp()
     let instance: ComponentInternalInstance
     let instanceProxy: any
     const Comp = {
@@ -124,14 +129,13 @@ describe('component: proxy', () => {
         instanceProxy = this
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'))
+    render(h(Comp), nodeOps.createElement('div'))
     instanceProxy.foo = 1
     expect(instanceProxy.foo).toBe(1)
     expect(instance!.sink.foo).toBe(1)
   })
 
   test('has check', () => {
-    const app = createApp()
     let instanceProxy: any
     const Comp = {
       render() {},
@@ -152,7 +156,7 @@ describe('component: proxy', () => {
         instanceProxy = this
       }
     }
-    app.mount(Comp, nodeOps.createElement('div'), { msg: 'hello' })
+    render(h(Comp, { msg: 'hello' }), nodeOps.createElement('div'))
 
     // props
     expect('msg' in instanceProxy).toBe(true)

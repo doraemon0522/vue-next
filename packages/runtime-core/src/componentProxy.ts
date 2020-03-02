@@ -1,14 +1,14 @@
 import { ComponentInternalInstance, Data, Emit } from './component'
 import { nextTick, queueJob } from './scheduler'
 import { instanceWatch } from './apiWatch'
-import { EMPTY_OBJ, hasOwn, isGloballyWhitelisted } from '@vue/shared'
+import { EMPTY_OBJ, hasOwn, isGloballyWhitelisted, NOOP } from '@vue/shared'
 import {
   ExtractComputedReturns,
   ComponentOptionsBase,
   ComputedOptions,
   MethodOptions
 } from './apiOptions'
-import { UnwrapRef, ReactiveEffect } from '@vue/reactivity'
+import { ReactiveEffect, UnwrapRef } from '@vue/reactivity'
 import { warn } from './warning'
 import { Slots } from './componentSlots'
 import {
@@ -19,13 +19,14 @@ import {
 // public properties exposed on the proxy, which is used as the render context
 // in templates (as `this` in the render option)
 export type ComponentPublicInstance<
-  P = {},
-  B = {},
-  D = {},
+  P = {}, // props type extracted from props option
+  B = {}, // raw bindings returned from setup()
+  D = {}, // return from data()
   C extends ComputedOptions = {},
   M extends MethodOptions = {},
   PublicProps = P
 > = {
+  $: ComponentInternalInstance
   $data: D
   $props: PublicProps
   $attrs: Data
@@ -51,7 +52,6 @@ const publicPropertiesMap: Record<
 > = {
   $: i => i,
   $el: i => i.vnode.el,
-  $cache: i => i.renderCache || (i.renderCache = []),
   $data: i => i.data,
   $props: i => i.propsProxy,
   $attrs: i => i.attrs,
@@ -63,13 +63,14 @@ const publicPropertiesMap: Record<
   $options: i => i.type,
   $forceUpdate: i => () => queueJob(i.update),
   $nextTick: () => nextTick,
-  $watch: i => instanceWatch.bind(i)
+  $watch: __FEATURE_OPTIONS__ ? i => instanceWatch.bind(i) : NOOP
 }
 
 const enum AccessTypes {
   DATA,
   CONTEXT,
-  PROPS
+  PROPS,
+  OTHER
 }
 
 export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
@@ -104,20 +105,24 @@ export const PublicInstanceProxyHandlers: ProxyHandler<any> = {
             return renderContext[key]
           case AccessTypes.PROPS:
             return propsProxy![key]
+          // default: just fallthrough
         }
       } else if (data !== EMPTY_OBJ && hasOwn(data, key)) {
         accessCache![key] = AccessTypes.DATA
         return data[key]
-      } else if (hasOwn(renderContext, key)) {
+      } else if (renderContext !== EMPTY_OBJ && hasOwn(renderContext, key)) {
         accessCache![key] = AccessTypes.CONTEXT
         return renderContext[key]
-      } else if (hasOwn(props, key)) {
-        // only cache props access if component has declared (thus stable) props
-        if (type.props != null) {
+      } else if (type.props != null) {
+        // only cache other properties when instance has declared (this stable)
+        // props
+        if (hasOwn(props, key)) {
           accessCache![key] = AccessTypes.PROPS
+          // return the value from propsProxy for ref unwrapping and readonly
+          return propsProxy![key]
+        } else {
+          accessCache![key] = AccessTypes.OTHER
         }
-        // return the value from propsProxy for ref unwrapping and readonly
-        return propsProxy![key]
       }
     }
 
