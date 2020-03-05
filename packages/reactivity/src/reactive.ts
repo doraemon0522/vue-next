@@ -13,6 +13,7 @@ import { UnwrapRef, Ref, isRef } from './ref'
 import { makeMap } from '@vue/shared'
 
 // WeakMaps that store {raw <-> observed} pairs.
+// rawToReactive: 代表目标对象每个 key 所对应的依赖于它的 effect 数组，也可以把它理解为观察者模式中的订阅者字典
 const rawToReactive = new WeakMap<any, any>()
 const reactiveToRaw = new WeakMap<any, any>()
 const rawToReadonly = new WeakMap<any, any>()
