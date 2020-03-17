@@ -47,6 +47,7 @@ function createRef(value: unknown, shallow = false) {
   if (!shallow) {
     value = convert(value)
   }
+  // 【关键代码】把 raw 值使用 get set 转化成一个 watchable 的 Object
   const r = {
     _isRef: true,
     get value() {
