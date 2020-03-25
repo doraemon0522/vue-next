@@ -92,6 +92,7 @@ function run(effect: ReactiveEffect, fn: Function, args: unknown[]): unknown {
   if (!effect.active) {
     return fn(...args)
   }
+  // includes的情况是：监听函数中，又改变了依赖数据，就会递归循环，加判断排除掉
   if (!effectStack.includes(effect)) {
     cleanup(effect)
     // try...finally的执行顺序:finally在try之后运行
